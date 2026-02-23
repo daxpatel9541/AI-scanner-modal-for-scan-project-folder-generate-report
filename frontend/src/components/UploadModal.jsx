@@ -4,16 +4,44 @@ import { X, Upload, FileCode, CheckCircle2, AlertCircle, Loader2 } from 'lucide-
 import { motion, AnimatePresence } from 'framer-motion';
 
 const UploadModal = ({ isOpen, onClose, onSuccess }) => {
-    const [file, setFile] = useState(null);
+    const [file, setFile] = useState(null); // ZIP file or Array of files
     const [projectName, setProjectName] = useState('');
     const [status, setStatus] = useState('idle'); // idle, uploading, scansuccess, error
     const [progress, setProgress] = useState(0);
+    const [uploadMode, setUploadMode] = useState('file'); // 'file' or 'folder'
+
+    const [ignoredCount, setIgnoredCount] = useState(0);
+    const IGNORED_DIRS = [
+        'node_modules', '.git', '.svn', '.hg', 'dist', 'build',
+        'venv', '.venv', 'env', '.env', '__pycache__',
+        '.vscode', '.idea', '.next', 'target', 'vendor'
+    ];
 
     const handleFileChange = (e) => {
-        const selectedFile = e.target.files[0];
-        if (selectedFile) {
-            setFile(selectedFile);
-            if (!projectName) setProjectName(selectedFile.name.replace('.zip', ''));
+        const selectedFiles = e.target.files;
+        if (selectedFiles && selectedFiles.length > 0) {
+            if (uploadMode === 'file') {
+                setFile(selectedFiles[0]);
+                if (!projectName) setProjectName(selectedFiles[0].name.replace('.zip', ''));
+                setIgnoredCount(0);
+            } else {
+                const fileArray = Array.from(selectedFiles);
+
+                // Smart Ignore: Filter out dependency folders and metadata
+                const filteredFiles = fileArray.filter(f => {
+                    const pathParts = f.webkitRelativePath.split('/');
+                    return !pathParts.some(part => IGNORED_DIRS.includes(part));
+                });
+
+                setFile(filteredFiles);
+                setIgnoredCount(fileArray.length - filteredFiles.length);
+
+                // Extract folder name from webkitRelativePath
+                const firstPath = selectedFiles[0].webkitRelativePath;
+                if (firstPath && !projectName) {
+                    setProjectName(firstPath.split('/')[0]);
+                }
+            }
         }
     };
 
@@ -36,24 +64,41 @@ const UploadModal = ({ isOpen, onClose, onSuccess }) => {
         setScanStep(0);
 
         const formData = new FormData();
-        formData.append('file', file);
         formData.append('projectName', projectName);
+        formData.append('mode', uploadMode);
+
+        if (uploadMode === 'file') {
+            formData.append('file', file);
+        } else {
+            // Folder mode: append each file with its relative path
+            file.forEach((f) => {
+                formData.append('files', f);
+                formData.append('paths', f.webkitRelativePath);
+            });
+        }
 
         try {
-            // Artificial delay for better UX and "genuine" feel
-            for (let i = 0; i < scanSteps.length; i++) {
+            // Simulated initialization phases
+            for (let i = 0; i < 3; i++) {
+                setScanStep(i);
+                setProgress(Math.round(((i + 1) / scanSteps.length) * 100));
+                await new Promise(resolve => setTimeout(resolve, 600));
+            }
+
+            const response = await axios.post('http://localhost:8000/api/upload/', formData);
+
+            // Finalizing phases
+            for (let i = 3; i < scanSteps.length; i++) {
                 setScanStep(i);
                 setProgress(Math.round(((i + 1) / scanSteps.length) * 100));
                 await new Promise(resolve => setTimeout(resolve, 800));
             }
 
-            const response = await axios.post('http://localhost:8000/api/upload/', formData);
-
             setStatus('scansuccess');
             setTimeout(() => {
                 onSuccess(response.data);
                 reset();
-            }, 1500);
+            }, 1000);
         } catch (error) {
             console.error("Upload error:", error);
             setStatus('error');
@@ -100,6 +145,22 @@ const UploadModal = ({ isOpen, onClose, onSuccess }) => {
                                 animate={{ opacity: 1, y: 0 }}
                                 exit={{ opacity: 0, y: -10 }}
                             >
+                                {/* Mode Toggle */}
+                                <div className="flex bg-slate-900/50 p-1 rounded-xl mb-6 border border-white/5">
+                                    <button
+                                        onClick={() => { setUploadMode('file'); setFile(null); }}
+                                        className={`flex-1 py-2 rounded-lg text-sm font-medium transition-all ${uploadMode === 'file' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-400 hover:text-white'}`}
+                                    >
+                                        ZIP File
+                                    </button>
+                                    <button
+                                        onClick={() => { setUploadMode('folder'); setFile(null); }}
+                                        className={`flex-1 py-2 rounded-lg text-sm font-medium transition-all ${uploadMode === 'folder' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-400 hover:text-white'}`}
+                                    >
+                                        Project Folder
+                                    </button>
+                                </div>
+
                                 <div className="mb-6">
                                     <label className="block text-sm font-medium text-slate-400 mb-2">Project Name</label>
                                     <input
@@ -112,36 +173,67 @@ const UploadModal = ({ isOpen, onClose, onSuccess }) => {
                                 </div>
 
                                 <div className="relative group border-2 border-dashed border-white/10 hover:border-blue-500/50 rounded-2xl p-10 text-center transition-all">
-                                    <input
-                                        type="file"
-                                        accept=".zip"
-                                        onChange={handleFileChange}
-                                        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                                    />
-                                    <div className="flex flex-col items-center">
+                                    {uploadMode === 'file' ? (
+                                        <input
+                                            type="file"
+                                            accept=".zip"
+                                            onChange={handleFileChange}
+                                            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                                        />
+                                    ) : (
+                                        <input
+                                            type="file"
+                                            webkitdirectory="true"
+                                            directory="true"
+                                            multiple
+                                            onChange={handleFileChange}
+                                            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                                        />
+                                    )}
+                                    <div className="flex flex-col items-center pointer-events-none">
                                         <div className="p-4 bg-blue-500/10 rounded-2xl mb-4 group-hover:scale-110 transition-transform">
                                             <Upload className="w-8 h-8 text-blue-400" />
                                         </div>
                                         {file ? (
-                                            <div className="flex items-center gap-2 text-blue-300 font-medium">
-                                                <FileCode className="w-4 h-4" />
-                                                {file.name}
+                                            <div className="flex flex-col items-center gap-1">
+                                                <div className="flex items-center gap-2 text-blue-300 font-medium">
+                                                    <FileCode className="w-4 h-4" />
+                                                    {uploadMode === 'file' ? file.name : `${file.length} Files Selected`}
+                                                </div>
+                                                {ignoredCount > 0 && (
+                                                    <span className="text-[10px] text-slate-500 bg-slate-800/50 px-2 py-0.5 rounded-full border border-white/5">
+                                                        Smart Ignored {ignoredCount} dependency files
+                                                    </span>
+                                                )}
                                             </div>
                                         ) : (
                                             <>
-                                                <h3 className="text-white font-semibold mb-1">Drag & drop your source code</h3>
-                                                <p className="text-slate-500 text-sm">Upload a .ZIP file for recursive security analysis</p>
+                                                <h3 className="text-white font-semibold mb-1">
+                                                    {uploadMode === 'file' ? 'Select ZIP File' : 'Select Project Folder'}
+                                                </h3>
+                                                <p className="text-slate-500 text-sm">
+                                                    {uploadMode === 'file' ? 'Upload a single .ZIP file' : 'Analysis will be recursive'}
+                                                </p>
                                             </>
                                         )}
                                     </div>
                                 </div>
+
+                                {file && file.length > 1000 && (
+                                    <div className="mt-4 p-3 bg-blue-500/10 border border-blue-500/20 rounded-xl flex items-start gap-3">
+                                        <AlertCircle className="w-5 h-5 text-blue-400 shrink-0 mt-0.5" />
+                                        <p className="text-xs text-blue-300">
+                                            <span className="font-bold">Enterprise Tip:</span> This is a large project. For faster scanning and better stability, we recommend uploading as a <span className="underline italic">single ZIP file</span>.
+                                        </p>
+                                    </div>
+                                )}
 
                                 <button
                                     disabled={!file}
                                     onClick={handleUpload}
                                     className="w-full mt-8 py-4 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-800 disabled:text-slate-500 rounded-2xl font-bold text-lg shadow-lg transition-all"
                                 >
-                                    Start Analysis
+                                    Start Deep Analysis
                                 </button>
                             </motion.div>
                         )}
@@ -210,7 +302,8 @@ const UploadModal = ({ isOpen, onClose, onSuccess }) => {
                                     <AlertCircle className="w-16 h-16 text-red-400" />
                                 </div>
                                 <h3 className="text-xl font-bold text-white mb-2">Scanning Failed</h3>
-                                <p className="text-slate-400 mb-6">There was an issue processing your project folder.</p>
+                                <p className="text-slate-400 mb-2">There was an issue processing your project folder.</p>
+                                <p className="text-xs text-slate-500 mb-6 max-w-xs text-center">Projects with 10k+ files are best processed as ZIP uploads for better stability.</p>
                                 <button onClick={reset} className="text-blue-400 hover:text-blue-300 font-bold underline">Try Again</button>
                             </motion.div>
                         )}

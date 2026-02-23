@@ -3,11 +3,23 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { X, AlertTriangle, CheckCircle, FileText, Download, Shield, ExternalLink, Zap } from 'lucide-react';
 
 const ScanDetailModal = ({ isOpen, onClose, scan }) => {
+    const [viewingCodeId, setViewingCodeId] = React.useState(null);
+
     if (!scan) return null;
 
     const generateReport = () => {
-        // Simulation of report generation
-        alert("Generating professional security report for Scan #" + scan.id + "...");
+        // Trigger enterprise report download from the backend
+        const downloadUrl = `http://localhost:8000/api/download-report/${scan.id}/`;
+
+        // Use a hidden anchor to trigger the download
+        const link = document.createElement('a');
+        link.href = downloadUrl;
+        link.setAttribute('download', `report_${scan.id}.pdf`);
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+
+        alert("Report generated and downloaded successfully.");
     };
 
     return (
@@ -106,10 +118,34 @@ const ScanDetailModal = ({ isOpen, onClose, scan }) => {
                                                         {vuln.explanation}
                                                     </div>
                                                 </div>
-                                                <button className="text-xs text-blue-400 hover:text-blue-300 font-semibold flex items-center gap-1 h-fit whitespace-nowrap">
-                                                    View Code <ExternalLink className="w-3 h-3" />
+                                                <button
+                                                    onClick={() => setViewingCodeId(viewingCodeId === vuln.id ? null : vuln.id)}
+                                                    className="text-xs text-blue-400 hover:text-blue-300 font-semibold flex items-center gap-1 h-fit whitespace-nowrap"
+                                                >
+                                                    {viewingCodeId === vuln.id ? 'Hide Code' : 'View Code'} <ExternalLink className="w-3 h-3" />
                                                 </button>
                                             </div>
+
+                                            {/* Code Snippet Viewer */}
+                                            <AnimatePresence>
+                                                {viewingCodeId === vuln.id && (
+                                                    <motion.div
+                                                        initial={{ height: 0, opacity: 0 }}
+                                                        animate={{ height: 'auto', opacity: 1 }}
+                                                        exit={{ height: 0, opacity: 0 }}
+                                                        className="overflow-hidden mt-4"
+                                                    >
+                                                        <div className="bg-slate-950 rounded-xl border border-slate-700 p-4 font-mono text-[11px] leading-relaxed text-slate-300 relative overflow-x-auto whitespace-pre">
+                                                            <div className="absolute left-0 top-0 bottom-0 w-1 bg-blue-500/50" />
+                                                            {vuln.code_snippet || "// Snippet not available for this finding"}
+                                                        </div>
+                                                        <p className="text-[10px] text-slate-600 mt-2 italic flex items-center gap-1">
+                                                            <FileText className="w-2.5 h-2.5" />
+                                                            Displaying 3 lines of context around vulnerability
+                                                        </p>
+                                                    </motion.div>
+                                                )}
+                                            </AnimatePresence>
                                         </motion.div>
                                     ))}
                                     {(!scan.vulnerabilities || scan.vulnerabilities.length === 0) && (

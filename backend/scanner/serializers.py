@@ -8,6 +8,7 @@ class VulnerabilitySerializer(serializers.ModelSerializer):
 
 class ScanSerializer(serializers.ModelSerializer):
     vulnerabilities = VulnerabilitySerializer(many=True, read_only=True)
+    project_name = serializers.CharField(source='project.name', read_only=True)
     
     class Meta:
         model = Scan

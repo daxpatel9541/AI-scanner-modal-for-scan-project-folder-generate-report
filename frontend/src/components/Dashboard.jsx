@@ -136,8 +136,8 @@ const Dashboard = () => {
                                             {scan.risk_score > 50 ? <AlertTriangle /> : <CheckCircle />}
                                         </div>
                                         <div>
-                                            <h4 className="font-semibold text-slate-200">Scan #{scan.id}</h4>
-                                            <p className="text-sm text-slate-500">{new Date(scan.created_at).toLocaleDateString()}</p>
+                                            <h4 className="font-semibold text-slate-200">Scan #{scan.id} • {scan.project_name || 'Analysis'}</h4>
+                                            <p className="text-sm text-slate-500">{new Date(scan.created_at).toLocaleDateString()} • Grade: <span className="text-blue-400 font-bold">{scan.security_grade}</span></p>
                                         </div>
                                     </div>
 
@@ -145,7 +145,7 @@ const Dashboard = () => {
                                         <div className="flex items-center gap-4">
                                             <div className="text-right">
                                                 <div className="text-sm font-bold text-slate-300">{scan.total_issues} Issues</div>
-                                                <div className="text-xs text-slate-500">Risk Score: {scan.risk_score}</div>
+                                                <div className="text-xs text-slate-500">Risk: {scan.risk_percentage?.toFixed(1)}%</div>
                                             </div>
                                             <ChevronRight className="w-5 h-5 text-slate-600 group-hover:text-blue-400 group-hover:translate-x-1 transition-all" />
                                         </div>
@@ -161,9 +161,11 @@ const Dashboard = () => {
             <UploadModal
                 isOpen={isUploadOpen}
                 onClose={() => setIsUploadOpen(false)}
-                onSuccess={() => {
+                onSuccess={(data) => {
                     setIsUploadOpen(false);
-                    fetchHistory();
+                    // Show details of the volatile scan immediately
+                    setSelectedScan(data);
+                    setIsDetailOpen(true);
                 }}
             />
 
