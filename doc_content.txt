@@ -1,0 +1,120 @@
+AI SecureScan - SaaS Level Security Code Review Platform
+1. Project Overview
+AI SecureScan is an AI-powered SaaS platform designed to automatically detect, analyze, and mitigate
+security vulnerabilities in AI-generated and human-written source code before deployment to production.
+The platform accepts ZIP files or project folders, performs static security analysis,
+applies AI-based contextual reasoning, and generates professional security reports.
+2. Problem Statement
+AI-generated code often introduces security vulnerabilities such as SQL Injection,
+Cross-Site Scripting (XSS), insecure authentication logic, and exposed secrets.
+Manual code reviews are slow and error-prone. Organizations require an automated,
+intelligent system that prevents insecure code from reaching production.
+3. Technology Stack
+Backend: Django (Python 3.11+)
+Database (Development): SQLite
+Database (Production): PostgreSQL
+Security Scanners: Bandit, Semgrep, pip-audit
+AI Layer: LLM-based contextual vulnerability analysis
+Frontend: Django Templates + Bootstrap/Tailwind
+Report Generation: HTML + PDF
+Deployment: Docker (Future Phase)
+4. Core System Architecture
+User uploads ZIP or Folder
+→ Upload Handler validates and stores files
+→ ZIP Extractor (if needed)
+→ Recursive File Scanner
+→ Static Analysis Layer (Bandit + Semgrep)
+→ Dependency Scanner
+→ AI Intelligence Layer
+→ Severity Classification Engine
+→ Report Generator
+→ Store results in Database
+→ Display results on User Dashboard
+5. Core Modules
+Authentication System:
+- User registration/login
+- Role-based access
+- Scan history isolation
+File Upload System:
+- Accept ZIP and Folder uploads
+- Validate file type and size
+- Temporary storage handling
+Static Analysis Engine:
+- Detect SQL Injection
+- Detect XSS
+- Detect hardcoded secrets
+- Detect insecure cryptography
+AI Intelligence Layer:
+- Context-aware vulnerability explanation
+- Severity classification
+- Secure code suggestion
+- Executive risk summary
+Report Generator:
+- Executive Summary
+- Severity breakdown
+- File-level vulnerability details
+- Secure fix recommendations
+6. Database Design
+Users Table:
+- id
+- username
+- email
+- password
+Projects Table:
+- id
+- user_id
+- project_name
+- upload_type
+- created_at
+Scans Table:
+- id
+- project_id
+- total_issues
+- risk_score
+- scan_status
+- created_at
+Vulnerabilities Table:
+- id
+- scan_id
+- file_name
+- line_number
+- vulnerability_type
+- severity
+- explanation
+- fix_suggestion
+7. Security Requirements
+- Never execute uploaded code
+- Perform static analysis only
+- Limit upload size
+- Timeout scanning process
+- Auto-delete temporary files
+- Prevent malicious file execution
+- Apply input validation everywhere
+8. SaaS-Level Features
+- Multi-user dashboard
+- Scan history tracking
+- Risk score trends
+- Report download system
+- Admin monitoring panel
+- Rate limiting per user
+- CI/CD integration (future phase)
+9. Development Roadmap
+Phase 1: MVP
+- Basic ZIP upload
+- Python scanning
+- Simple report generation
+Phase 2: Multi-language Support
+- Add Semgrep
+- Add dependency scanning
+Phase 3: AI Intelligence
+- Contextual vulnerability explanation
+- Secure code generation
+Phase 4: SaaS Expansion
+- Dashboard
+- Authentication
+- Scan history
+- PostgreSQL migration
+Phase 5: Enterprise Integration
+- GitHub integration
+- CI/CD blocking
+- Docker deployment
