@@ -7,6 +7,7 @@ const UploadModal = ({ isOpen, onClose, onSuccess }) => {
     const [file, setFile] = useState(null); // ZIP file or Array of files
     const [projectName, setProjectName] = useState('');
     const [status, setStatus] = useState('idle'); // idle, uploading, scansuccess, error
+    const [errorMessage, setErrorMessage] = useState('');
     const [progress, setProgress] = useState(0);
     const [uploadMode, setUploadMode] = useState('file'); // 'file' or 'folder'
 
@@ -14,7 +15,20 @@ const UploadModal = ({ isOpen, onClose, onSuccess }) => {
     const IGNORED_DIRS = [
         'node_modules', '.git', '.svn', '.hg', 'dist', 'build',
         'venv', '.venv', 'env', '.env', '__pycache__',
-        '.vscode', '.idea', '.next', 'target', 'vendor'
+        '.vscode', '.idea', '.next', 'target', 'vendor',
+        'assets', 'images', 'img', 'docs', 'documentation', 'logs',
+        'tmp', 'temp', 'obj', 'bin', '.cache', 'bower_components', 'site-packages'
+    ];
+
+    const IGNORED_EXTENSIONS = [
+        '.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico', '.webp', // Images
+        '.mp4', '.mov', '.avi', '.wmv', '.flv', // Video
+        '.mp3', '.wav', '.flac', '.m4a', // Audio
+        '.pdf', '.docx', '.doc', '.xlsx', '.xls', '.pptx', '.ppt', // Documents
+        '.zip', '.tar', '.gz', '.rar', '.7z', // Archives
+        '.exe', '.dll', '.so', '.dylib', '.bin', // Binaries
+        '.woff', '.woff2', '.ttf', '.eot', // Fonts
+        '.map', '.log', '.tmp' // Metadata/Logs
     ];
 
     const handleFileChange = (e) => {
@@ -27,10 +41,15 @@ const UploadModal = ({ isOpen, onClose, onSuccess }) => {
             } else {
                 const fileArray = Array.from(selectedFiles);
 
-                // Smart Ignore: Filter out dependency folders and metadata
+                // Smart Ignore: Filter out dependency folders, metadata, and unimportant file types
                 const filteredFiles = fileArray.filter(f => {
                     const pathParts = f.webkitRelativePath.split('/');
-                    return !pathParts.some(part => IGNORED_DIRS.includes(part));
+                    const fileName = f.name.toLowerCase();
+                    // Don't check the root folder (pathParts[0]) against IGNORED_DIRS
+                    // Only check subfolders (pathParts.slice(1))
+                    const hasIgnoredDir = pathParts.slice(1).some(part => IGNORED_DIRS.includes(part));
+                    const hasIgnoredExt = IGNORED_EXTENSIONS.some(ext => fileName.endsWith(ext));
+                    return !hasIgnoredDir && !hasIgnoredExt;
                 });
 
                 setFile(filteredFiles);
@@ -101,6 +120,8 @@ const UploadModal = ({ isOpen, onClose, onSuccess }) => {
             }, 1000);
         } catch (error) {
             console.error("Upload error:", error);
+            const msg = error.response?.data?.error || "There was an issue processing your project assets. Check system limits.";
+            setErrorMessage(msg);
             setStatus('error');
         }
     };
@@ -109,6 +130,7 @@ const UploadModal = ({ isOpen, onClose, onSuccess }) => {
         setFile(null);
         setProjectName('');
         setStatus('idle');
+        setErrorMessage('');
         setProgress(0);
     };
 
@@ -302,8 +324,8 @@ const UploadModal = ({ isOpen, onClose, onSuccess }) => {
                                     <AlertCircle className="w-16 h-16 text-red-400" />
                                 </div>
                                 <h3 className="text-xl font-bold text-white mb-2">Scanning Failed</h3>
-                                <p className="text-slate-400 mb-2">There was an issue processing your project folder.</p>
-                                <p className="text-xs text-slate-500 mb-6 max-w-xs text-center">Projects with 10k+ files are best processed as ZIP uploads for better stability.</p>
+                                <p className="text-slate-400 mb-2 px-4 text-center">{errorMessage}</p>
+                                <p className="text-xs text-slate-500 mb-6 max-w-xs text-center italic">Tip: Large projects are often more stable when uploaded as a single ZIP file.</p>
                                 <button onClick={reset} className="text-blue-400 hover:text-blue-300 font-bold underline">Try Again</button>
                             </motion.div>
                         )}

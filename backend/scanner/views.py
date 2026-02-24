@@ -7,165 +7,189 @@ from django.conf import settings
 from django.http import FileResponse, Http404
 from rest_framework.views import APIView
 from rest_framework.response import Response
-from rest_framework import status
+from rest_framework import status, permissions
 from django.core.files.storage import default_storage
 from django.contrib.auth.models import User
 from .models import Project, Scan, Vulnerability
-from .engine import aggregate_scan_results, calculate_enterprise_risk
-from .report_generator import generate_enterprise_report
+from .logic.scannerEngine import ScannerEngine
+from .logic.severityEngine import SeverityEngine
+from .logic.reportGenerator import ReportGenerator
 from .serializers import ScanSerializer
+
+import logging
+
+logger = logging.getLogger(__name__)
 
 class ScanUploadView(APIView):
     def post(self, request, format=None):
-        mode = request.data.get('mode', 'file')
-        project_name = request.data.get('projectName', 'Unnamed Project')
-        
-        # Enterprise Persistence: Link scans to a demo user for safety
-        user, _ = User.objects.get_or_create(username='demo_user')
-        project, _ = Project.objects.get_or_create(user=user, name=project_name)
-
-        temp_project_dir = tempfile.mkdtemp()
-        scan_target = ""
-
-        LOG_FILE = os.path.join(tempfile.gettempdir(), "scanner_failure_debug.log")
-        def debug_log(msg):
-            with open(LOG_FILE, "a") as f:
-                f.write(f"[{time.ctime()}] {msg}\n")
-        
-        debug_log(f"--- New Scan Start (168 files check) ---")
-
         try:
-            if mode == 'file':
-                file_obj = request.FILES.get('file')
-                if not file_obj:
-                    debug_log("Error: No file uploaded")
-                    return Response({"error": "No file uploaded"}, status=status.HTTP_400_BAD_REQUEST)
-                
-                path = default_storage.save('temp/' + file_obj.name, file_obj)
-                scan_target = default_storage.path(path)
-            else:
-                files = request.FILES.getlist('files')
-                paths = request.data.getlist('paths')
-                
-                debug_log(f"Folder mode: files={len(files)}, paths={len(paths)}")
-                
-                if not files:
-                    debug_log("Error: No files in request.FILES")
-                    return Response({"error": "No files uploaded for folder mode"}, status=status.HTTP_400_BAD_REQUEST)
+            mode = request.data.get('mode', 'file')
+            project_name = request.data.get('projectName', 'Unnamed Project')
+            
+            # Enterprise Persistence
+            user, _ = User.objects.get_or_create(username='demo_user')
+            project, _ = Project.objects.get_or_create(user=user, name=project_name)
 
-                # Reconstruct directory structure
-                for i, (f, p) in enumerate(zip(files, paths)):
-                    # Sanitize path
-                    p = p.lstrip('/').replace('../', '')
-                    target_path = os.path.join(temp_project_dir, p)
-                    os.makedirs(os.path.dirname(target_path), exist_ok=True)
-                    try:
+            # Use local temp directory to avoid Windows path length issues
+            temp_base = os.path.join(settings.BASE_DIR, 'temp_scans')
+            os.makedirs(temp_base, exist_ok=True)
+            temp_project_dir = tempfile.mkdtemp(dir=temp_base)
+            scan_target = ""
+
+            # PHASE 1: Asset Reconstruction
+            try:
+                if mode == 'file':
+                    file_obj = request.FILES.get('file')
+                    if not file_obj:
+                        return Response({"error": "No file uploaded"}, status=status.HTTP_400_BAD_REQUEST)
+                    
+                    if file_obj.name.endswith('.zip'):
+                        path = default_storage.save('temp/' + file_obj.name, file_obj)
+                        scan_target = temp_project_dir
+                        try:
+                            with zipfile.ZipFile(default_storage.path(path), 'r') as zip_ref:
+                                zip_ref.extractall(temp_project_dir)
+                        finally:
+                            default_storage.delete(path)
+                    else:
+                        path = default_storage.save('temp/' + file_obj.name, file_obj)
+                        scan_target = default_storage.path(path)
+                else:
+                    files = request.FILES.getlist('files')
+                    paths = request.data.getlist('paths')
+                    if not paths: paths = request.POST.getlist('paths')
+
+                    if not files:
+                        return Response({"error": "No files found in upload. Check project permissions."}, status=status.HTTP_400_BAD_REQUEST)
+
+                    logger.info(f"Reconstructing {len(files)} files for {project_name}")
+                    for f, p in zip(files, paths):
+                        p = os.path.normpath(p.lstrip('/\\').replace('../', ''))
+                        target_path = os.path.join(temp_project_dir, p)
+                        os.makedirs(os.path.dirname(target_path), exist_ok=True)
                         with open(target_path, 'wb+') as destination:
                             for chunk in f.chunks():
                                 destination.write(chunk)
-                    except Exception as fe:
-                        debug_log(f"File write error at {p}: {str(fe)}")
-                
-                scan_target = os.path.join(tempfile.gettempdir(), f"folder_scan_{int(time.time())}.zip")
-                debug_log(f"Zipping to {scan_target}")
-                with zipfile.ZipFile(scan_target, 'w', zipfile.ZIP_DEFLATED) as zipf:
-                    for root, _, dirs_files in os.walk(temp_project_dir):
-                        for file_name in dirs_files:
-                            file_full_path = os.path.join(root, file_name)
-                            zip_path = os.path.relpath(file_full_path, temp_project_dir)
-                            zipf.write(file_full_path, zip_path)
-
-            try:
-                debug_log(f"Running engine on {scan_target}")
-                results = aggregate_scan_results(scan_target)
-                debug_log(f"Engine success: {len(results)} issues")
+                    scan_target = temp_project_dir
             except Exception as e:
-                debug_log(f"Engine crash: {str(e)}")
-                return Response({"error": f"Scanning engine error: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-            
-            # Enterprise Risk Scoring
-            total_score, risk_percent, grade = calculate_enterprise_risk(results)
-            
-            # Create Scan record
-            scan = Scan.objects.create(
-                project=project,
-                total_issues=len(results),
-                risk_score=total_score,
-                risk_percentage=risk_percent,
-                security_grade=grade,
-                status='completed'
-            )
+                logger.error(f"PHASE 1 (Reconstruction) Failed: {e}")
+                return Response({"error": f"Failed to reconstruct project: {str(e)}"}, status=500)
 
-            # Save vulnerabilities with impact analysis
-            vulnerability_objects = []
-            for issue in results:
-                ai = issue.get('ai_analysis', {})
-                vuln = Vulnerability.objects.create(
-                    scan=scan,
-                    file_name=issue.get('file'),
-                    line_number=issue.get('line', 0),
-                    vulnerability_type=issue.get('scanner') + ": " + issue.get('type'),
-                    severity=issue.get('severity', 'LOW').upper(),
-                    explanation=ai.get('impact', 'Potential security risk detected.'),
-                    impact_analysis=ai.get('scenario', 'Attackers could exploit this to compromise the system.'),
-                    fix_suggestion=ai.get('secure_code', '# Follow standard security practices.'),
-                    code_snippet=issue.get('snippet', '')
+            # PHASE 2: Scanning Logic
+            try:
+                engine = ScannerEngine(scan_target)
+                results = engine.scan()
+                total_score, counts = SeverityEngine.calculate_risk_score(results)
+                grade = SeverityEngine.calculate_grade(total_score)
+                risk_percent = SeverityEngine.calculate_risk_percentage(total_score)
+            except Exception as e:
+                logger.error(f"PHASE 2 (Scanning) Failed: {e}")
+                return Response({"error": f"Security Analysis Failed: {str(e)}"}, status=500)
+
+            # PHASE 3: Data Persistence
+            try:
+                scan = Scan.objects.create(
+                    project=project,
+                    total_issues=len(results),
+                    risk_score=total_score,
+                    risk_percentage=risk_percent,
+                    security_grade=grade,
+                    status='completed'
                 )
-                vulnerability_objects.append(vuln)
 
-            # 4. Generate Professional PDF Report
-            os.makedirs(os.path.join(settings.MEDIA_ROOT, 'reports'), exist_ok=True)
-            report_name = f"report_{scan.id}_{int(time.time())}.pdf"
-            report_path = os.path.join(settings.MEDIA_ROOT, 'reports', report_name)
-            
-            generate_enterprise_report(scan, vulnerability_objects, report_path)
-            
-            # Update scan with report file path
-            scan.report_file.name = f"reports/{report_name}"
-            scan.save()
+                for issue in results:
+                    Vulnerability.objects.create(
+                        scan=scan,
+                        file_name=issue.get('file'),
+                        line_number=issue.get('line', 0),
+                        vulnerability_type=issue.get('vulnerabilityType'),
+                        severity=issue.get('severity', 'LOW').upper(),
+                        explanation=issue.get('description'),
+                        impact_analysis=issue.get('description'),
+                        fix_suggestion=issue.get('solution'),
+                        code_snippet=issue.get('snippet', '')
+                    )
+            except Exception as e:
+                logger.error(f"PHASE 3 (Persistence) Failed: {e}")
+                return Response({"error": f"Failed to save scan results: {str(e)}"}, status=500)
+
+            # PHASE 4: Report Generation
+            try:
+                os.makedirs(os.path.join(settings.MEDIA_ROOT, 'reports'), exist_ok=True)
+                report_name = f"report_{scan.id}.pdf"
+                report_path = os.path.join(settings.MEDIA_ROOT, 'reports', report_name)
+                
+                reporter = ReportGenerator({
+                    'total_files': engine.total_files_scanned,
+                    'total_issues': len(results),
+                    'risk_score': total_score,
+                    'risk_percentage': risk_percent,
+                    'security_grade': grade,
+                    'issues': results,
+                    'counts': counts
+                }, project_name)
+                
+                reporter.generate_pdf(report_path)
+                scan.report_file.name = f"reports/{report_name}"
+                scan.save()
+            except Exception as e:
+                logger.warning(f"PHASE 4 (Reporting) Failed: {e}. Scan saved but PDF unavailable.")
 
             serializer = ScanSerializer(scan)
             return Response(serializer.data, status=status.HTTP_201_CREATED)
 
         except Exception as e:
-            import traceback
-            debug_log(f"Global View Error: {str(e)}\n{traceback.format_exc()}")
-            return Response({"error": f"Internal server error: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            logger.exception("Global Scan Failure")
+            return Response({"error": f"Deep System Error: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         finally:
-            if scan_target and os.path.exists(scan_target):
-                # Only remove if it's the temp zip we created or we saved a zip
-                if mode == 'folder' or scan_target.endswith('.zip'):
-                    try: os.remove(scan_target)
-                    except: pass
-            if temp_project_dir and os.path.exists(temp_project_dir):
-                shutil.rmtree(temp_project_dir)
+            # Safer cleanup
+            try:
+                if temp_project_dir and os.path.exists(temp_project_dir):
+                    shutil.rmtree(temp_project_dir)
+            except Exception as ce:
+                logger.warning(f"Cleanup failed: {ce}")
 
 class ScanDownloadView(APIView):
-    """
-    Dedicated view for secure report downloads.
-    """
+    permission_classes = [permissions.AllowAny]
+
     def get(self, request, scan_id):
+        print(f"\n>>> DOWNLOAD REQUEST: Scan ID={scan_id}")
         try:
-            scan = Scan.objects.get(id=scan_id)
-            # In a real SaaS, we would validate: if scan.project.user != request.user: return 403
+            format_type = request.query_params.get('format', 'pdf').lower()
+            logger.info(f"Report download requested for Scan ID: {scan_id}, format: {format_type}")
             
-            if not scan.report_file:
-                return Response({"error": "Report not generated yet."}, status=404)
-                
+            try:
+                scan = Scan.objects.get(id=scan_id)
+            except Scan.DoesNotExist:
+                logger.error(f"Scan ID {scan_id} not found in DB.")
+                return Response({"error": "Scan record not found in system."}, status=404)
+
+            # Default to PDF (JSON removed as per user request)
+            if not scan.report_file or not scan.report_file.name:
+                logger.error(f"Scan {scan_id} has no report_file name in DB.")
+                return Response({"error": "Report data is missing for this scan."}, status=404)
+
             file_path = scan.report_file.path
-            if os.path.exists(file_path):
-                return FileResponse(
-                    open(file_path, 'rb'), 
-                    content_type='application/pdf',
-                    as_attachment=True,
-                    filename=os.path.basename(file_path)
-                )
-            else:
-                raise Http404("Report file missing on server.")
-        except Scan.DoesNotExist:
-            raise Http404("Scan not found.")
+            if not os.path.exists(file_path):
+                logger.error(f"PDF file missing on disk: {file_path}")
+                return Response({"error": "Report file was not found on the server."}, status=404)
+                
+            logger.info(f"Serving PDF: {file_path}")
+            
+            response = FileResponse(
+                open(file_path, 'rb'), 
+                content_type='application/pdf'
+            )
+            # Add headers for high-compatibility downloads
+            response['Content-Disposition'] = f'attachment; filename="Security_Report_{scan_id}.pdf"'
+            response['Access-Control-Expose-Headers'] = 'Content-Disposition'
+            return response
+
+        except Exception as e:
+            logger.exception(f"CRITICAL: Failed to serve report {scan_id}")
+            return Response({"error": f"Internal Server Error: {str(e)}"}, status=500)
 
 class ProjectHistoryView(APIView):
     def get(self, request):
-        # Disable persistent history as requested
+        # Disable persistent history as per user request (maintain empty/clean state)
         return Response([])

@@ -163,6 +163,8 @@ const Dashboard = () => {
                 onClose={() => setIsUploadOpen(false)}
                 onSuccess={(data) => {
                     setIsUploadOpen(false);
+                    // Refresh history after new scan
+                    fetchHistory();
                     // Show details of the volatile scan immediately
                     setSelectedScan(data);
                     setIsDetailOpen(true);

@@ -1,25 +1,57 @@
 import React from 'react';
+import axios from 'axios';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, AlertTriangle, CheckCircle, FileText, Download, Shield, ExternalLink, Zap } from 'lucide-react';
 
 const ScanDetailModal = ({ isOpen, onClose, scan }) => {
     const [viewingCodeId, setViewingCodeId] = React.useState(null);
+    const [downloading, setDownloading] = React.useState(false);
 
     if (!scan) return null;
 
-    const generateReport = () => {
-        // Trigger enterprise report download from the backend
-        const downloadUrl = `http://localhost:8000/api/download-report/${scan.id}/`;
+    const generateReport = async (format = 'pdf') => {
+        setDownloading(true);
+        try {
+            // Use current hostname to handle different environments (localhost, IP, etc.)
+            const hostname = window.location.hostname;
+            const downloadUrl = `http://${hostname}:8000/api/download-report/${scan.id}/?format=${format}`;
 
-        // Use a hidden anchor to trigger the download
-        const link = document.createElement('a');
-        link.href = downloadUrl;
-        link.setAttribute('download', `report_${scan.id}.pdf`);
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
+            console.log("Attempting to download from:", downloadUrl);
 
-        alert("Report generated and downloaded successfully.");
+            // Professional Download logic using axios to handle blobs
+            const response = await axios.get(downloadUrl, {
+                responseType: 'blob',
+                timeout: 30000 // 30s timeout
+            });
+
+            if (!response.data || response.data.size === 0) {
+                throw new Error("Received empty file from server.");
+            }
+
+            const url = window.URL.createObjectURL(new Blob([response.data], { type: 'application/pdf' }));
+            const link = document.createElement('a');
+            link.href = url;
+            link.setAttribute('download', `report_${scan.id}_${scan.project_name?.replace(/\s+/g, '_') || 'scan'}.pdf`);
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            window.URL.revokeObjectURL(url);
+        } catch (error) {
+            console.error("Primary download failed, attempting fallback:", error);
+
+            // Fallback: Direct window.open for maximum compatibility
+            try {
+                const hostname = window.location.hostname;
+                const fallbackUrl = `http://${hostname}:8000/api/download-report/${scan.id}/?format=${format}`;
+                window.open(fallbackUrl, '_blank');
+            } catch (fallbackError) {
+                console.error("Fallback failed:", fallbackError);
+                const errorMsg = error.response?.data?.error || error.message || "Unknown error";
+                alert(`Failed to download report: ${errorMsg}. Ensure the backend server is running on port 8000.`);
+            }
+        } finally {
+            setDownloading(false);
+        }
     };
 
     return (
@@ -45,11 +77,16 @@ const ScanDetailModal = ({ isOpen, onClose, scan }) => {
                             </div>
                             <div className="flex items-center gap-2">
                                 <button
-                                    onClick={generateReport}
-                                    className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-sm font-semibold transition-all shadow-lg shadow-blue-900/20"
+                                    disabled={downloading}
+                                    onClick={() => generateReport('pdf')}
+                                    className="flex items-center gap-2 px-6 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-sm font-bold transition-all disabled:opacity-50 shadow-lg shadow-blue-900/20"
                                 >
-                                    <Download className="w-4 h-4" />
-                                    Generate Report
+                                    {downloading ? (
+                                        <div className="w-4 h-4 border-2 border-white/20 border-t-white rounded-full animate-spin" />
+                                    ) : (
+                                        <Download className="w-4 h-4" />
+                                    )}
+                                    Download Report (PDF)
                                 </button>
                                 <button
                                     onClick={onClose}
@@ -66,7 +103,7 @@ const ScanDetailModal = ({ isOpen, onClose, scan }) => {
                             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                                 <div className="p-4 bg-slate-800/30 rounded-2xl border border-slate-700/30">
                                     <p className="text-slate-500 text-xs uppercase tracking-wider mb-1">Risk Score</p>
-                                    <p className={`text-2xl font-bold ${scan.risk_score > 50 ? 'text-red-400' : 'text-green-400'}`}>{scan.risk_score}/100</p>
+                                    <p className={`text-2xl font-bold ${scan.risk_score > 50 ? 'text-red-400' : 'text-green-400'}`}>{scan.risk_score} pts</p>
                                 </div>
                                 <div className="p-4 bg-slate-800/30 rounded-2xl border border-slate-700/30">
                                     <p className="text-slate-500 text-xs uppercase tracking-wider mb-1">Total Issues</p>
