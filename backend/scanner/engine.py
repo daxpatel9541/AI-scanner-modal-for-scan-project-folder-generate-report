@@ -4,6 +4,7 @@ import subprocess
 import json
 import tempfile
 import shutil
+import re
 
 def run_bandit_scan(folder_path):
     """
@@ -72,6 +73,51 @@ def run_semgrep_scan(folder_path):
         print(f"Error running Semgrep: {e}")
         return []
 
+def detect_secrets(folder_path):
+    """
+    Scans files for common secret patterns using regex.
+    """
+    secrets_found = []
+    # Patterns for Stripe, AWS, JWT, and generic API tokens
+    patterns = {
+        'Stripe Secret Key': r'sk_(?:test|live)_[0-9a-zA-Z]{24}',
+        'AWS Access Key': r'(?:AKIA|ASYA|ABIA|ACCA)[0-9A-Z]{16}',
+        'AWS Secret Key': r'(?<![A-Za-z0-9/+=])[A-Za-z0-9/+=]{40}(?![A-Za-z0-9/+=])',
+        'JWT Secret': r'eyJ[A-Za-z0-9-_=]+\.[A-Za-z0-9-_=]+\.?[A-Za-z0-9-_.+/=]*',
+        'Generic API Token': r'(?:api_key|api_token|secret_key|secret_token|access_token|auth_token)[\'\" \t]*[:=][\'\" \t]*[0-9a-zA-Z]{32,}'
+    }
+
+    print(f"Starting Secret Detection on: {folder_path}")
+    
+    for root, _, files in os.walk(folder_path):
+        for file in files:
+            file_path = os.path.join(root, file)
+            # Skip binary files, git history, and node_modules
+            if any(part in file_path for part in ['.git', 'node_modules', '__pycache__']):
+                continue
+                
+            try:
+                with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                    content = f.read()
+                    for secret_name, pattern in patterns.items():
+                        matches = re.finditer(pattern, content)
+                        for match in matches:
+                            line_num = content.count('\n', 0, match.start()) + 1
+                            secrets_found.append({
+                                'file': os.path.relpath(file_path, folder_path),
+                                'line': line_num,
+                                'type': f"Leaked {secret_name}",
+                                'severity': 'CRITICAL',
+                                'scanner': 'SecretScanner',
+                                'ai_analysis': ai_intelligence_layer({'type': 'secret', 'secret_type': secret_name}),
+                                'snippet': get_code_snippet(file_path, line_num)
+                            })
+            except Exception as e:
+                print(f"Error scanning {file_path} for secrets: {e}")
+                
+    print(f"SecretScanner found {len(secrets_found)} potential leaks.")
+    return secrets_found
+
 def ai_intelligence_layer(vulnerability):
     """
     Enterprise-grade AI-driven contextual analysis.
@@ -80,6 +126,16 @@ def ai_intelligence_layer(vulnerability):
     v_type = vulnerability.get('type', 'Unknown').lower()
     code_snippet = vulnerability.get('code', '')
     
+    # Check if it's a secret leak
+    if v_type == 'secret' or 'secret' in v_type:
+        secret_type = vulnerability.get('secret_type', 'API Key')
+        return {
+            "impact": f"Unauthorized access to {secret_type} cloud resources, payment gateways, or user data.",
+            "scenario": "An attacker finds this hardcoded key in your public repository and uses it to drain funds, steal user data, or compromise infrastructure.",
+            "fix": "Immediately rotate and revoke this key. Use environment variables (.env files) or a secret manager (AWS Secrets Manager, HashiCorp Vault).",
+            "secure_code": "# Use environment variables\nimport os\napi_key = os.getenv('MY_SECRET_KEY')"
+        }
+
     # Mock Enterprise AI logic with attack scenarios and secure fixes
     scenarios = {
         "eval": {
@@ -229,6 +285,13 @@ def aggregate_scan_results(zip_file_path):
                     print(f"Error processing Semgrep issue: {se}")
         except Exception as sge:
             print(f"Semgrep aggregator error: {sge}")
+
+        # 3. Run Custom Secret Scanner
+        try:
+            secret_issues = detect_secrets(temp_dir)
+            aggregated_results.extend(secret_issues)
+        except Exception as se:
+            print(f"Secret detection error: {se}")
 
         print(f"Aggregated {len(aggregated_results)} total vulnerabilities.")
         return aggregated_results
