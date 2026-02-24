@@ -1,5 +1,39 @@
+# Environment variables
 .env
-node_modules
-__pycache__
+.env.*
+!.env.example
+
+# Dependencies
+node_modules/
+dist/
+build/
+.npm
+.eslintcache
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+env/
+.env/
+
+# Database
 *.sqlite3
+
+# IDEs and Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
 .DS_Store
+Thumbs.db
+
+# Project specific
+test_project/node_modules/
+frontend/node_modules/
+backend/temp/
+media/
