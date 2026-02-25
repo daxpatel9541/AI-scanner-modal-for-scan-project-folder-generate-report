@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Product Recognition System</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Product Recognition System</h1>
+            <p>Train new products or detect existing ones</p>
+        </header>
+
+        <!-- Mode Selection -->
+        <div class="mode-selection" id="mode-selection">
+            <h2>Choose Mode</h2>
+            <div class="mode-buttons">
+                <button id="train-mode-btn" class="mode-btn">
+                    <span class="icon">🎓</span>
+                    <span>Train Mode</span>
+                    <small>Capture images to train a new product</small>
+                </button>
+                <button id="detect-mode-btn" class="mode-btn">
+                    <span class="icon">🔍</span>
+                    <span>Detect Mode</span>
+                    <small>Recognize trained products</small>
+                </button>
+            </div>
+            <div class="trained-products">
+                <h3>Trained Products:</h3>
+                <div id="product-list">Loading...</div>
+            </div>
+        </div>
+
+        <!-- Training Mode -->
+        <div class="train-section" id="train-section" style="display: none;">
+            <button class="back-btn" id="back-from-train">← Back</button>
+            <h2>Training Mode</h2>
+            <div class="setup" id="setup">
+                <label for="product-name">Product Name:</label>
+                <input type="text" id="product-name" placeholder="Enter product name">
+                <button id="start-capture-btn">Start Capture</button>
+            </div>
+
+            <div class="capture" id="capture" style="display: none;">
+                <div class="video-container">
+                    <video id="video" autoplay playsinline></video>
+                    <canvas id="canvas" style="display: none;"></canvas>
+                </div>
+                <div class="instructions">
+                    <h3>Instructions</h3>
+                    <ul>
+                        <li>Position your product in front of the camera</li>
+                        <li>Rotate the product slowly to capture from different angles</li>
+                        <li>Ensure good lighting and clear view</li>
+                        <li>System will automatically capture 50 images</li>
+                    </ul>
+                </div>
+                <div class="progress">
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="progress-fill"></div>
+                    </div>
+                    <p id="status">Captured: 0/50</p>
+                </div>
+                <div class="buttons">
+                    <button id="stop-btn" style="display: none;">Stop Capture</button>
+                    <button id="finish-btn" style="display: none;">Finish Training</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Detection Mode -->
+        <div class="detect-section" id="detect-section" style="display: none;">
+            <button class="back-btn" id="back-from-detect">← Back</button>
+            <h2>Detection Mode</h2>
+            <div class="detect-controls">
+                <button id="start-detect-btn">Start Detection</button>
+                <button id="stop-detect-btn" style="display: none;">Stop Detection</button>
+            </div>
+            <div class="detect-view" id="detect-view" style="display: none;">
+                <div class="video-container">
+                    <video id="detect-video" autoplay playsinline></video>
+                    <canvas id="detect-canvas" style="display: none;"></canvas>
+                </div>
+                <div class="detection-result" id="detection-result">
+                    <h3>Detection Results</h3>
+                    <div class="result-content">
+                        <p class="waiting">Waiting for object...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="message" id="message" style="display: none;"></div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+</body>
+</html>
