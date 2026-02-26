@@ -91,6 +91,7 @@ class ScanUploadView(APIView):
                 scan = Scan.objects.create(
                     project=project,
                     total_issues=len(results),
+                    total_files_scanned=engine.total_files_scanned,
                     risk_score=total_score,
                     risk_percentage=risk_percent,
                     security_grade=grade,
@@ -153,43 +154,70 @@ class ScanDownloadView(APIView):
     permission_classes = [permissions.AllowAny]
 
     def get(self, request, scan_id):
-        print(f"\n>>> DOWNLOAD REQUEST: Scan ID={scan_id}")
         try:
-            format_type = request.query_params.get('format', 'pdf').lower()
-            logger.info(f"Report download requested for Scan ID: {scan_id}, format: {format_type}")
+            logger.info(f"Report download requested for Scan ID: {scan_id}")
             
             try:
                 scan = Scan.objects.get(id=scan_id)
             except Scan.DoesNotExist:
-                logger.error(f"Scan ID {scan_id} not found in DB.")
-                return Response({"error": "Scan record not found in system."}, status=404)
+                return Response({"error": "Scan record not found."}, status=404)
 
-            # Default to PDF (JSON removed as per user request)
-            if not scan.report_file or not scan.report_file.name:
-                logger.error(f"Scan {scan_id} has no report_file name in DB.")
-                return Response({"error": "Report data is missing for this scan."}, status=404)
+            # Prepare directories
+            reports_dir = os.path.join(settings.MEDIA_ROOT, 'reports')
+            os.makedirs(reports_dir, exist_ok=True)
 
-            file_path = scan.report_file.path
-            if not os.path.exists(file_path):
-                logger.error(f"PDF file missing on disk: {file_path}")
-                return Response({"error": "Report file was not found on the server."}, status=404)
+            # Strict PDF Enforcement: Regenerate if missing OR if it's a legacy JSON path
+            current_path = scan.report_file.path if scan.report_file and scan.report_file.name else ""
+            needs_regeneration = not current_path or not os.path.exists(current_path) or not current_path.lower().endswith('.pdf')
+
+            if needs_regeneration:
+                logger.info(f"Regenerating PDF for scan {scan.id} (needs_regen={needs_regeneration})")
+                vulnerabilities = scan.vulnerabilities.all()
+                results = []
+                counts = {'CRITICAL': 0, 'HIGH': 0, 'MEDIUM': 0, 'LOW': 0}
+                for v in vulnerabilities:
+                    results.append({
+                        'file': v.file_name,
+                        'line': v.line_number,
+                        'vulnerabilityType': v.vulnerability_type,
+                        'severity': v.severity,
+                        'description': v.explanation,
+                        'solution': v.fix_suggestion,
+                        'snippet': v.code_snippet
+                    })
+                    counts[v.severity] = counts.get(v.severity, 0) + 1
+
+                report_name = f"report_{scan.id}.pdf"
+                file_path = os.path.join(reports_dir, report_name)
                 
-            logger.info(f"Serving PDF: {file_path}")
-            
-            response = FileResponse(
-                open(file_path, 'rb'), 
-                content_type='application/pdf'
-            )
-            # Add headers for high-compatibility downloads
-            response['Content-Disposition'] = f'attachment; filename="Security_Report_{scan_id}.pdf"'
+                reporter = ReportGenerator({
+                    'total_files': scan.total_files_scanned,
+                    'total_issues': len(results),
+                    'risk_score': scan.risk_score,
+                    'risk_percentage': scan.risk_percentage,
+                    'security_grade': scan.security_grade,
+                    'issues': results,
+                    'counts': counts
+                }, scan.project.name)
+                reporter.generate_pdf(file_path)
+                
+                # Update DB with the correct PDF path
+                scan.report_file.name = f"reports/{report_name}"
+                scan.save()
+            else:
+                file_path = current_path
+
+            response = FileResponse(open(file_path, 'rb'), content_type='application/pdf')
+            response['Content-Disposition'] = f'attachment; filename="Security_Report_{scan.id}.pdf"'
             response['Access-Control-Expose-Headers'] = 'Content-Disposition'
             return response
 
         except Exception as e:
-            logger.exception(f"CRITICAL: Failed to serve report {scan_id}")
-            return Response({"error": f"Internal Server Error: {str(e)}"}, status=500)
+            logger.exception(f"Report serving failed for {scan_id}")
+            return Response({"error": f"Failed to generate/serve report: {str(e)}"}, status=500)
 
 class ProjectHistoryView(APIView):
     def get(self, request):
-        # Disable persistent history as per user request (maintain empty/clean state)
-        return Response([])
+        scans = Scan.objects.all().order_by('-created_at')
+        serializer = ScanSerializer(scans, many=True)
+        return Response(serializer.data)

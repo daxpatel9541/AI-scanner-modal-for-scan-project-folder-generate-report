@@ -251,11 +251,11 @@ const UploadModal = ({ isOpen, onClose, onSuccess }) => {
                                 )}
 
                                 <button
-                                    disabled={!file}
+                                    disabled={!file || status === 'uploading'}
                                     onClick={handleUpload}
                                     className="w-full mt-8 py-4 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-800 disabled:text-slate-500 rounded-2xl font-bold text-lg shadow-lg transition-all"
                                 >
-                                    Start Deep Analysis
+                                    {status === 'uploading' ? 'Analyzing...' : 'Start Deep Analysis'}
                                 </button>
                             </motion.div>
                         )}

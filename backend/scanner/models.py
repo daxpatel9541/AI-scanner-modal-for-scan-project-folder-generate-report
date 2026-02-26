@@ -13,6 +13,7 @@ class Project(models.Model):
 class Scan(models.Model):
     project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name='scans')
     total_issues = models.IntegerField(default=0)
+    total_files_scanned = models.IntegerField(default=0)
     risk_score = models.FloatField(default=0.0)
     risk_percentage = models.FloatField(default=0.0)
     security_grade = models.CharField(max_length=5, default='A')
